@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
-import { DataChart } from "@/components/DataChart";
-import { DataTable } from "@/components/DataTable";
-import { processExcelFile, ProcessedData } from "@/utils/excelProcessor";
+import { OccupancyChart } from "@/components/OccupancyChart";
+import { OccupancyTable } from "@/components/OccupancyTable";
+import { processExcelFile, DailyOccupancy, CityTotals } from "@/utils/excelProcessor";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, FileSpreadsheet, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const Index = () => {
-  const [data, setData] = useState<ProcessedData[] | null>(null);
+  const [data, setData] = useState<DailyOccupancy[] | null>(null);
+  const [totals, setTotals] = useState<CityTotals | null>(null);
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState<string>("");
   const { toast } = useToast();
@@ -19,11 +20,12 @@ const Index = () => {
 
     try {
       const result = await processExcelFile(file);
-      setData(result);
+      setData(result.daily);
+      setTotals(result.totals);
       
       toast({
         title: "Ficheiro processado com sucesso!",
-        description: `${result.length} portas analisadas`,
+        description: `${result.daily.length} dias analisados`,
       });
     } catch (error) {
       toast({
@@ -32,6 +34,7 @@ const Index = () => {
         variant: "destructive",
       });
       setData(null);
+      setTotals(null);
     } finally {
       setLoading(false);
     }
@@ -39,21 +42,27 @@ const Index = () => {
 
   const handleReset = () => {
     setData(null);
+    setTotals(null);
     setFileName("");
   };
 
   const exportToCSV = () => {
-    if (!data) return;
+    if (!data || !totals) return;
 
     const csvContent = [
-      ["Porta", "Pessoas Únicas"],
-      ...data.map(row => [row.porta, row.count.toString()])
-    ].map(row => row.join(",")).join("\n");
+      ["Dia de Ocupação", "Lisboa", "Porto", "Évora", "Setúbal"],
+      ...data.map(row => {
+        const date = new Date(row.date);
+        const formattedDate = date.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' });
+        return [formattedDate, row.lisboa, row.porto, row.evora, row.setubal].join(",");
+      }),
+      ["Total", totals.lisboa, totals.porto, totals.evora, totals.setubal].join(",")
+    ].join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `analise_portas_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `ocupacao_cidades_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
 
@@ -101,7 +110,7 @@ const Index = () => {
           </div>
         )}
 
-        {data && !loading && (
+        {data && totals && !loading && (
           <div className="space-y-8 animate-in fade-in duration-500">
             <div className="flex items-center justify-between">
               <div>
@@ -119,8 +128,8 @@ const Index = () => {
               </div>
             </div>
 
-            <DataChart data={data} />
-            <DataTable data={data} />
+            <OccupancyChart data={data} />
+            <OccupancyTable data={data} totals={totals} />
           </div>
         )}
       </div>

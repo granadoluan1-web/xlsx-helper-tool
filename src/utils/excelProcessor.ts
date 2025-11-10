@@ -11,7 +11,39 @@ export interface ProcessedData {
   count: number;
 }
 
-export function processExcelFile(file: File): Promise<ProcessedData[]> {
+export interface DailyOccupancy {
+  date: string;
+  lisboa: number;
+  porto: number;
+  evora: number;
+  setubal: number;
+}
+
+export interface CityTotals {
+  lisboa: number;
+  porto: number;
+  evora: number;
+  setubal: number;
+}
+
+function getCityFromDoor(porta: string): string {
+  const doorUpper = porta.toUpperCase();
+  if (doorUpper.startsWith('C2') || doorUpper.startsWith('C3') || doorUpper.startsWith('P2')) {
+    return 'lisboa';
+  }
+  if (doorUpper.includes('EVR')) {
+    return 'evora';
+  }
+  if (doorUpper.includes('OPO')) {
+    return 'porto';
+  }
+  if (doorUpper.includes('STB')) {
+    return 'setubal';
+  }
+  return 'other';
+}
+
+export function processExcelFile(file: File): Promise<{ daily: DailyOccupancy[], totals: CityTotals }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -86,37 +118,64 @@ export function processExcelFile(file: File): Promise<ProcessedData[]> {
           }
         }
 
-        // Remove duplicates: same user, same door, same day
-        const uniqueEntries = new Map<string, ExcelRow>();
+        // Remove duplicates: same user, same city, same day
+        const uniqueEntries = new Map<string, { date: Date; user: string; city: string }>();
         
         rows.forEach((row) => {
+          const city = getCityFromDoor(row.porta);
+          if (city === 'other') return; // Skip unrecognized doors
+          
           const dateKey = row.dataHora.toISOString().split('T')[0];
-          const key = `${dateKey}-${row.utilizador}-${row.porta}`;
+          const key = `${dateKey}-${row.utilizador}-${city}`;
           
           if (!uniqueEntries.has(key)) {
-            uniqueEntries.set(key, row);
+            uniqueEntries.set(key, {
+              date: row.dataHora,
+              user: row.utilizador,
+              city: city
+            });
           }
         });
 
-        // Count unique people per door
-        const doorCounts = new Map<string, Set<string>>();
+        // Group by date and city
+        const dailyData = new Map<string, { lisboa: Set<string>, porto: Set<string>, evora: Set<string>, setubal: Set<string> }>();
         
         uniqueEntries.forEach((entry) => {
-          if (!doorCounts.has(entry.porta)) {
-            doorCounts.set(entry.porta, new Set());
+          const dateKey = entry.date.toISOString().split('T')[0];
+          
+          if (!dailyData.has(dateKey)) {
+            dailyData.set(dateKey, {
+              lisboa: new Set(),
+              porto: new Set(),
+              evora: new Set(),
+              setubal: new Set()
+            });
           }
-          doorCounts.get(entry.porta)!.add(entry.utilizador);
+          
+          const dayData = dailyData.get(dateKey)!;
+          dayData[entry.city as keyof typeof dayData].add(entry.user);
         });
 
-        // Convert to array and sort by count
-        const result: ProcessedData[] = Array.from(doorCounts.entries())
-          .map(([porta, users]) => ({
-            porta,
-            count: users.size,
+        // Convert to array and sort by date
+        const daily: DailyOccupancy[] = Array.from(dailyData.entries())
+          .map(([date, cities]) => ({
+            date,
+            lisboa: cities.lisboa.size,
+            porto: cities.porto.size,
+            evora: cities.evora.size,
+            setubal: cities.setubal.size,
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-        resolve(result);
+        // Calculate totals
+        const totals: CityTotals = {
+          lisboa: daily.reduce((sum, day) => sum + day.lisboa, 0),
+          porto: daily.reduce((sum, day) => sum + day.porto, 0),
+          evora: daily.reduce((sum, day) => sum + day.evora, 0),
+          setubal: daily.reduce((sum, day) => sum + day.setubal, 0),
+        };
+
+        resolve({ daily, totals });
       } catch (error) {
         reject(new Error("Erro ao processar o ficheiro Excel: " + (error as Error).message));
       }
