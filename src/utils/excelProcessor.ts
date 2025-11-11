@@ -43,6 +43,11 @@ function getCityFromDoor(porta: string): string {
   return 'other';
 }
 
+function isWeekday(date: Date): boolean {
+  const day = date.getDay();
+  return day !== 0 && day !== 6; // 0 = Domingo, 6 = Sábado
+}
+
 export function processExcelFile(file: File): Promise<{ daily: DailyOccupancy[], totals: CityTotals }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -156,8 +161,9 @@ export function processExcelFile(file: File): Promise<{ daily: DailyOccupancy[],
           dayData[entry.city as keyof typeof dayData].add(entry.user);
         });
 
-        // Convert to array and sort by date
+        // Convert to array, filter weekdays only, and sort by date
         const daily: DailyOccupancy[] = Array.from(dailyData.entries())
+          .filter(([date]) => isWeekday(new Date(date)))
           .map(([date, cities]) => ({
             date,
             lisboa: cities.lisboa.size,
